@@ -1,0 +1,142 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: institutions
+    // Document ID: {tenantId} (Matches admin uid)
+    // Fields:
+    //   - tenantId: string (required, max 100 chars, immutable)
+    //   - assets: list (optional, max 1000 items)
+    //   - workstations: list (optional, max 1000 items)
+    //   - tickets: list (optional, max 1000 items)
+    //
+    // Collection: institutions/{tenantId}/tickets (Secure Fallback)
+    // Document ID: auto-generated
+    // Fields:
+    //   - text: string (required, max 1000 chars)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: telemetry
+    // Document ID: {tenantId} (Matches admin uid)
+    // Fields:
+    //   - tenantId: string (required, max 100 chars, immutable)
+    //   - lastPing: timestamp (required)
+    //   - status: string (required, enum: 'online', 'offline', 'error')
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidInstitution(data) {
+      return hasOnlyAllowedFields(['tenantId', 'assets', 'workstations', 'tickets']) &&
+             data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 100 &&
+             (!('assets' in data) || (data.assets is list && data.assets.size() <= 1000)) &&
+             (!('workstations' in data) || (data.workstations is list && data.workstations.size() <= 1000)) &&
+             (!('tickets' in data) || (data.tickets is list && data.tickets.size() <= 1000));
+    }
+
+    function isValidTicket(data) {
+      return hasOnlyAllowedFields(['text', 'createdAt']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 1000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTelemetry(data) {
+      // Strict schema for telemetry pings
+      return hasOnlyAllowedFields(['tenantId', 'lastPing', 'status']) &&
+             data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 100 &&
+             data.lastPing is timestamp &&
+             data.status is string && data.status in ['online', 'offline', 'error'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /institutions/{tenantId} {
+      // -----------------------------------------------------------------
+      // Owner-only access
+      // -----------------------------------------------------------------
+      allow read: if isOwner(tenantId);
+      allow create: if isOwner(tenantId) && 
+                    isValidInstitution(request.resource.data) && 
+                    request.resource.data.tenantId == tenantId;
+      allow update: if isOwner(tenantId) && 
+                    isValidInstitution(request.resource.data) && 
+                    areImmutableFieldsUnchanged(['tenantId']);
+      allow delete: if isOwner(tenantId);
+
+      // -----------------------------------------------------------------
+      // SECURITY FALLBACK FOR PUBLIC TICKETS
+      // -----------------------------------------------------------------
+      // Modifying arrays inside a monolithic document via unauthenticated 
+      // users is a critical vulnerability. It requires allowing `read` to the 
+      // entire document (leaking PII, assets, workstations) to perform arrayUnion,
+      // and risks schema corruption on `update`. 
+      //
+      // SECURE FALLBACK: Unauthenticated users should append tickets to a 
+      // subcollection. This allows them to `create` tickets without ever 
+      // reading the parent institution document or interfering with its schema.
+      // -----------------------------------------------------------------
+      match /tickets/{ticketId} {
+        // Only admin can read the tickets
+        allow read: if isOwner(tenantId);
+        
+        // Anyone (even unauthenticated) can submit a ticket, but strict schema prevents abuse
+        allow create: if isValidTicket(request.resource.data);
+        
+        // Only admin can update or delete tickets
+        allow update, delete: if isOwner(tenantId);
+      }
+    }
+
+    match /telemetry/{tenantId} {
+      // Admin can read their telemetry
+      allow read: if isOwner(tenantId);
+
+      // -----------------------------------------------------------------
+      // UNAUTHENTICATED NEXT.JS API ROUTE PINGS
+      // -----------------------------------------------------------------
+      // Allowing unauthenticated writes from a Next.js API route via the 
+      // Client SDK means ANY user on the internet can write to this collection.
+      // NOTE: A more secure architecture is to use the Firebase Admin SDK 
+      // in the Next.js API route, which bypasses rules, allowing you to deny 
+      // all client writes here.
+      //
+      // However, since unauthenticated writes are required by current design,
+      // we strictly enforce the schema to prevent DoS (e.g. 1MB strings) 
+      // and schema pollution.
+      // -----------------------------------------------------------------
+      allow create: if isValidTelemetry(request.resource.data) && 
+                    request.resource.data.tenantId == tenantId;
+      allow update: if isValidTelemetry(request.resource.data) && 
+                    areImmutableFieldsUnchanged(['tenantId']);
+      allow delete: if isOwner(tenantId);
+    }
+  }
+}

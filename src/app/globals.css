@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -24;
+    }
+  }
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-subtle: #f1f5f9;
+  --surface-elevated: #ffffff;
+  --surface-border: #e2e8f0;
+  --surface-highlight: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  min-height: 100dvh;
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Pristine Card Architecture */
+.clean-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem; /* rounded-md */
+  box-shadow: none;
+}
+
+.clean-card-hover {
+  transition: border-color 150ms ease;
+}
+.clean-card-hover:hover {
+  border-color: #94a3b8;
+}
+
+/* Kinetic Spring Press */
+.btn-press {
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+.btn-press:active {
+  transform: translateY(1px);
+}
